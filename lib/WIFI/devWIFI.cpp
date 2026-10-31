@@ -88,6 +88,7 @@ static wl_status_t laststatus = WL_IDLE_STATUS;
 static volatile WiFiMode_t wifiMode = WIFI_OFF;
 static volatile WiFiMode_t changeMode = WIFI_OFF;
 static volatile unsigned long changeTime = 0;
+static unsigned long homeScanTime = 0;
 
 static const byte DNS_PORT = 53;
 static IPAddress apIP(10, 0, 0, 1);
@@ -872,6 +873,23 @@ static void HandleWebUpdate()
     changeTime = now;
     changeMode = WIFI_AP;
     DBGLN("Connection failed %d", status);
+  }
+  // A phone hotspot as the home network is gone exactly when it's needed: the phone can't host it
+  // while it is on our AP setting us up, and iOS hides it while idle. One miss used to leave us on
+  // the AP until a reboot. So, on the AP with a home network saved and nobody on it, keep scanning
+  // and go back to the home network as soon as it is on the air.
+  if (wifiMode == WIFI_AP && station_ssid[0] != 0 && WiFi.softAPgetStationNum() == 0 && (now - homeScanTime) > 10000) {
+    int n = WiFi.scanComplete();
+    for (int i = 0; i < n; i++) {
+      if (WiFi.SSID(i) == station_ssid) {
+        DBGLN("Home network '%s' is back", station_ssid);
+        changeTime = now - 1000;
+        changeMode = WIFI_STA;
+        break;
+      }
+    }
+    if (n != WIFI_SCAN_RUNNING) WiFi.scanNetworks(true);
+    homeScanTime = now;
   }
   if (changeMode != wifiMode && changeMode != WIFI_OFF && (now - changeTime) > 500) {
     switch(changeMode) {
